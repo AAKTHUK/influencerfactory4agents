@@ -59,7 +59,7 @@ app.post("/api/claude", auth, async (req, res) => {
   try {
     const client = new Anthropic({ apiKey: ANTHROPIC_KEY });
     const response = await client.messages.create({
-      model: "claude-sonnet-4-20250514",
+      model: "claude-sonnet-4-5",
       max_tokens: maxTokens,
       system,
       messages: [{ role: "user", content: user }]
@@ -81,21 +81,23 @@ app.post("/api/generate", auth, async (req, res) => {
   try {
     const client = new Anthropic({ apiKey: ANTHROPIC_KEY });
     const response = await client.messages.create({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 1500,
-      system: "You are a ghostwriter. Output ONLY a JSON array starting with [ and ending with ]. No markdown, no explanation.",
+      model: "claude-sonnet-4-5",
+      max_tokens: 2000,
+      system: "You are a ghostwriter. Output ONLY a valid JSON array. Start with [ and end with ]. Each item must be {\"text\":\"...\"}. No markdown, no extra text, no trailing commas.",
       messages: [{
         role: "user",
         content: `Write 5 tweets for ${persona.name} who posts about ${persona.niche} with a ${persona.tone || "conversational"} tone.${persona.bio ? " Bio: " + persona.bio : ""}
-Rules: under 280 chars each, 1-2 hashtags, sound human not AI, punchy and engaging.
-Return: [{"text":"tweet content here"}]`
+Rules: under 200 chars each (keep short), 1 hashtag max, sound human, no quotes inside tweet text.
+Return exactly: [{"text":"tweet1"},{"text":"tweet2"},{"text":"tweet3"},{"text":"tweet4"},{"text":"tweet5"}]`
       }]
     });
 
     const raw = response.content.filter(b => b.type === "text").map(b => b.text).join("");
-    const s = raw.indexOf("["), e = raw.lastIndexOf("]");
-    if (s === -1 || e === -1) throw new Error("Failed to parse tweets");
-    const tweets = JSON.parse(raw.slice(s, e + 1));
+    console.log("[RAW CLAUDE RESPONSE]", JSON.stringify(raw));
+    // Always extract via regex — immune to truncation and malformed JSON
+    const matches = [...raw.matchAll(/"text"\s*:\s*"((?:[^"\\]|\\.)*)"/g)];
+    if (!matches.length) throw new Error("Failed to parse tweets — raw: " + raw.slice(0, 300));
+    const tweets = matches.map(m => ({ text: m[1].replace(/\n/g, " ").trim() }));
 
     const saved = tweets.map((t, i) => {
       const id = Date.now() + "-" + i;

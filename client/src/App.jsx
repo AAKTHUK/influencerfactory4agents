@@ -26,17 +26,25 @@ async function callClaude(system, user, maxTokens = 2000) {
 }
 
 function pj(raw) {
-  let c = raw.replace(/```json/g, "").replace(/```/g, "").trim();
-  // Fix smart quotes
-  c = c.replace(/‘/g, "'").replace(/’/g, "'").replace(/“/g, '"').replace(/”/g, '"');
+  let c = raw.replace(/```json/gi, "").replace(/```/g, "").trim();
+  c = c.replace(/[\u2018\u2019]/g, "'").replace(/[\u201c\u201d]/g, '"');
   const s = c.indexOf("[") !== -1 ? c.indexOf("[") : c.indexOf("{");
   const e = Math.max(c.lastIndexOf("]"), c.lastIndexOf("}"));
   if (s === -1 || e < s) throw new Error("No JSON found in response");
-  const str = c.slice(s, e + 1);
+  let str = c.slice(s, e + 1);
+  str = str.replace(/[\r\n]+/g, " ").replace(/\t/g, " ");
+  str = str.replace(/,\s*([\]}])/g, "$1");
   try {
     return JSON.parse(str);
-  } catch(err) {
-    throw new Error("JSON Parse error: " + err.message);
+  } catch {
+    const objs = [];
+    const rx = /{[^{}]*}/g;
+    let m;
+    while ((m = rx.exec(str)) !== null) {
+      try { objs.push(JSON.parse(m[0])); } catch {}
+    }
+    if (objs.length) return objs;
+    throw new Error("Failed to parse AI response. Please try again.");
   }
 }
 
@@ -282,25 +290,31 @@ Each caption must have:
 Keep it simple and clean. No curly quotes. No special unicode.
 
 Return this exact JSON format:
-[{"topic":"topic name","captions":[{"caption":"hook line\\nbody line\\nbody line\\ncall to action\\n\\n#hashtag1 #hashtag2 #hashtag3","image_description":"short image description here"}]}]`
+[{"topic":"topic name","captions":[{"caption":"hook line\\nbody line\\nbody line\\ncall to action\\n\\n#hashtag1 #hashtag2 #hashtag3","image_description":"short image description here"}]}]`,
+        5000
       );
       await wtick(setA2,0,"✓"); await wtick(setA2,1,"running"); setPct(82);
       const packs = pj(r2);
       const posts = [];
       packs.forEach((pack,pi)=>{
-        (pack.captions||[]).forEach((item,ci)=>{
+        const ts = Date.now();
+        const captions = pack.captions || (pack.caption ? [pack] : []);
+        captions.forEach((item,ci)=>{
+          const text = item.caption || item.text || "";
+          if (!text) return;
           posts.push({
-            id:`${Date.now()}-${pi}-${ci}`,
+            id:`${ts}-${pi}-${ci}`,
             personaId:p.id, personaName:p.name,
             personaHandle:p.igHandle||"",
-            topic:pack.topic,
-            text:item.caption,
+            topic:pack.topic||"",
+            text,
             imageDescription:item.image_description||"",
             status:"pending",
             createdAt:new Date().toISOString()
           });
         });
       });
+      if (!posts.length) throw new Error("AI returned no captions — please try again");
       await wtick(setA2,1,"✓"); await wtick(setA2,2,"running"); setPct(97);
       await wtick(setA2,2,"✓"); setPct(100);
       setDone(true); addPosts(posts);
